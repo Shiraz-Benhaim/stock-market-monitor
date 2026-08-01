@@ -29,3 +29,5 @@ venv
 .DS_Store
 
 .codspeed
+
+.env

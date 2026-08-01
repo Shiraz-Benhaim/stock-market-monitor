@@ -9,7 +9,9 @@ load_dotenv()
 class Config:
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-    SYMBOLS = [s.strip() for s in os.getenv("SYMBOLS", "AAPL,MSFT,NVDA,QQQ,SPY").split(",")]
+    SYMBOLS = [symbol.strip() for symbol in os.getenv("SYMBOLS", "AAPL,MSFT,NVDA,QQQ,SPY").split(",")]
+
+    SUCCESS_HTTP_STATUS_CODE = 200
     
     @classmethod
     def validate(cls):

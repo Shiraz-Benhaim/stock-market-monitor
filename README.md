@@ -12,12 +12,12 @@
 
 **Stock Market Monitor** automates daily financial technical analysis to eliminate manual portfolio tracking. Built with extensibility in mind using the **Strategy Pattern**, developers can easily plug in new custom technical indicators (SMA, RSI, MACD, etc.).
 
-The system is deployed on **AWS Serverless infrastructure** running on a daily cron schedule via **Amazon EventBridge** and **AWS Lambda**, operating with zero maintenance and zero cost under the AWS Free Tier.
+The system is deployed on **AWS Serverless infrastructure** running on a daily cron schedule via **Amazon EventBridge** and **AWS Lambda**.
 
 ## 🏗️ Architecture
 
 ```text
-[ Amazon EventBridge ] (Daily Cron Schedule)
+[ Amazon EventBridge ] (Weekly Cron Schedule)
          │
          ▼
   [ AWS Lambda ] ──► Fetch Market Data (yfinance API)
@@ -34,8 +34,8 @@ The system is deployed on **AWS Serverless infrastructure** running on a daily c
 
 - **Extensible Indicator Engine**: Clean Object-Oriented design using Abstract Classes for seamless addition of new technical indicators.
 - **Serverless Architecture**: Event-driven execution via AWS Lambda & EventBridge (Zero Server Overhead).
-- **Security Firs**t: Strict separation of secrets using Environment Variables and AWS SSM Parameter Store.
-- **Real-Time Push Notification**s: Immediate alert dispatch via Telegram Bot API with Markdown formatting.
+- **Security First**: Strict separation of secrets using Environment Variables and AWS SSM Parameter Store.
+- **Real-Time Push Notifications**: Immediate alert dispatch via Telegram Bot API with Markdown formatting.
 
 ---
 
@@ -52,8 +52,8 @@ The system is deployed on **AWS Serverless infrastructure** running on a daily c
 
 1. **Clone Repository:**
    ```bash
-   git clone [https://github.com/your-username/fin-alert-engine.git](https://github.com/your-username/fin-alert-engine.git)
-   cd fin-alert-engine
+   git clone [https://github.com/Shiraz-Benhaim/stock-market-monitor.git](https://github.com/Shiraz-Benhaim/stock-market-monitor.git)
+   cd stock-market-monitor
    ```
 
 2. **Setup Virtual Environment & Install Dependencies:**
@@ -64,15 +64,11 @@ The system is deployed on **AWS Serverless infrastructure** running on a daily c
    ```
 
 3. **Configure Environment Variables:**
-   Create a `.env` file based on `.env.example`:
-   ```bash
-   cp .env.example .env
-   ```
-   Fill in your `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and target `SYMBOLS`.
+   Create a `.env` file and fill in your `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, and target `SYMBOLS`.
 
 4. **Run Locally:**
    ```bash
-   python -m src.main
+   python -m app.py
    ```
 
 ---
@@ -83,15 +79,15 @@ The system is deployed on **AWS Serverless infrastructure** running on a daily c
    Package the code along with dependencies into a deployment zip file or Lambda Layer.
 
 2. **Create Lambda Function:**
-   Create an AWS Lambda function with Python 3.10+ runtime and set `src.main.lambda_handler` as the entry point.
+   Create an AWS Lambda function with Python 3.10+ runtime and set `app.lambda_handler` as the entry point.
 
 3. **Set Environment Variables:**
    Configure Environment Variables in the AWS Lambda Console (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SYMBOLS`).
 
 4. **Configure EventBridge Trigger:**
-   Add an **Amazon EventBridge** schedule trigger with a cron expression to run after market close:
+   Add an **Amazon EventBridge** schedule trigger with a cron expression to run on saterday morning:
    ```text
-   cron(30 21 ? * MON-FRI *)
+   cron(0 5 ? * SAT *)
    ```
 
 ---
