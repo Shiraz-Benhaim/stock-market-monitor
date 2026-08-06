@@ -33,8 +33,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
+      - name: Upload package to S3
+        run: |
+          aws s3 cp deployment_package.zip s3://stock-market-monitor-deployments/deployment_package.zip
+
       - name: Deploy to AWS Lambda
         run: |
           aws lambda update-function-code \
             --function-name stock-market-monitor \
             --zip-file fileb://deployment_package.zip
+            --s3-bucket stock-market-monitor-deployments \
+            --s3-key deployment_package.zip
