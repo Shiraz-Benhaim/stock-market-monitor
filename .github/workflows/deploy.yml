@@ -41,6 +41,5 @@ jobs:
         run: |
           aws lambda update-function-code \
             --function-name stock-market-monitor \
-            --zip-file fileb://deployment_package.zip
             --s3-bucket stock-market-monitor-deployments \
             --s3-key deployment_package.zip
