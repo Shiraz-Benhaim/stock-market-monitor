@@ -1,6 +1,6 @@
 import requests
 
-from config import Config
+from src.config import Config
 
 
 def send_telegram_alert(bot_token: str, chat_id: str, message: str) -> bool:
