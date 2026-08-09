@@ -1,7 +1,7 @@
 import yfinance as yf
 import pandas as pd
 
-from config import Config
+from src.config import Config
 
 
 def fetch_market_history(symbol: str) -> pd.DataFrame:
