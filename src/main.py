@@ -1,10 +1,10 @@
-from src.config import Config
 from src import data_fetcher, notifier
+from src.config import Config
 from src.indicators import IndicatorBase, RSIIndicator, SMACrossIndicator
 
 
 def run_pipeline():
-    # Config.validate()
+    Config.validate()
 
     active_indicators: list[IndicatorBase] = [
         SMACrossIndicator(window=50, threshold_percentage=0.0),  # SMA 50
@@ -50,8 +50,8 @@ def run_pipeline():
     else:
         print("No indicators triggered today.")
 
-    for m in messages_to_send:
-        print(m)
+    for message in messages_to_send:
+        print(message)
         print('\n')
 
 

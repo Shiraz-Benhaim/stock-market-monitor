@@ -68,7 +68,7 @@ The system is deployed on **AWS Serverless infrastructure** running on a daily c
 
 4. **Run Locally:**
    ```bash
-   python -m app.py
+   python -m main.py
    ```
 
 ---
@@ -79,7 +79,7 @@ The system is deployed on **AWS Serverless infrastructure** running on a daily c
    Package the code along with dependencies into a deployment zip file or Lambda Layer.
 
 2. **Create Lambda Function:**
-   Create an AWS Lambda function with Python 3.10+ runtime and set `app.lambda_handler` as the entry point.
+   Create an AWS Lambda function with Python 3.10+ runtime and set `src.main.lambda_handler` as the entry point.
 
 3. **Set Environment Variables:**
    Configure Environment Variables in the AWS Lambda Console (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SYMBOLS`).
