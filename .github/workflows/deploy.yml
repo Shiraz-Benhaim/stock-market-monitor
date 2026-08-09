@@ -24,6 +24,7 @@ jobs:
           mkdir artifact
           pip install -r requirements.txt -t artifact/
           cp -r src artifact/
+          cp -r app.py artifact/
           cd artifact && zip -r ../deployment_package.zip .
 
       - name: Configure AWS Credentials
