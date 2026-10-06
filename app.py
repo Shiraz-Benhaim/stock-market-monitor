@@ -7,8 +7,8 @@ def run_pipeline():
     Config.validate()
 
     active_indicators: list[IndicatorBase] = [
+        SMACrossIndicator(window=20, threshold_percentage=0.0),  # SMA 20
         SMACrossIndicator(window=50, threshold_percentage=0.0),  # SMA 50
-        SMACrossIndicator(window=150, threshold_percentage=0.0),  # SMA 150
         SMACrossIndicator(window=200, threshold_percentage=0.0),  # SMA 200
         RSIIndicator(period=14, oversold=35.0)  # RSI Oversold
     ]
