@@ -88,8 +88,8 @@ This document explains how the system works, how to configure and deploy it, and
 |---|---|---|
 | 1 | `Config.from_env()` | Builds an immutable `Config` from environment variables. Fails fast if `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID` is missing. |
 | 2 | `data_fetcher.fetch_market_history()` | Downloads daily OHLCV data from Yahoo Finance via `yfinance` for the period set by `HISTORY_PERIOD`. |
-| 3 | `scan_symbol()` | Runs each active indicator whose `min_history` is satisfied (logging a warning for any that are skipped). `evaluate()` returns an `IndicatorResult` when its condition is met and `None` otherwise. |
-| 4 | `format_symbol_report()` | Formats the triggered alerts for each symbol into one HTML block that includes the latest close price. Symbols that failed to load are collected into a final "Failed to scan" block. |
+| 3 | `scanner.scan_symbol()` | Runs each active indicator whose `min_history` is satisfied (logging a warning for any that are skipped). `evaluate()` returns an `IndicatorResult` when its condition is met and `None` otherwise. |
+| 4 | `report.format_symbol_report()` | Formats the triggered alerts for each symbol into one HTML block that includes the latest close price. Symbols that failed to load are collected into a final "Failed to scan" block. |
 | 5 | `notifier.split_message()` / `send_telegram_alert()` | Joins the blocks with a separator into as few messages as fit Telegram's 4,096-character limit and sends them. A rejected message raises, so the Lambda invocation fails visibly. |
 
 ---
@@ -109,6 +109,8 @@ stock-market-monitor/
 └── src/
     ├── config.py                # Environment-driven configuration & validation
     ├── data_fetcher.py          # Market data retrieval (yfinance)
+    ├── scanner.py               # Runs the indicators on one symbol's history
+    ├── report.py                # Formats the Telegram HTML report
     ├── notifier.py              # Telegram delivery & message splitting
     └── indicators/
         ├── __init__.py          # Public indicator exports
@@ -119,7 +121,9 @@ stock-market-monitor/
 
 | Module | Responsibility |
 |---|---|
-| `app.py` | Defines `ACTIVE_INDICATORS`, scans each symbol, formats the report, and exposes `lambda_handler(event, context)`. |
+| `app.py` | Defines `ACTIVE_INDICATORS`, orchestrates the scan in `run_pipeline()`, and exposes `lambda_handler(event, context)`. |
+| `src/scanner.py` | `scan_symbol()` runs every indicator whose `min_history` is met and collects the results. |
+| `src/report.py` | Formats per-symbol and failure sections as Telegram HTML (escaping dynamic text). |
 | `src/config.py` | The frozen `Config` dataclass. `Config.from_env()` loads `.env` (via `python-dotenv`) and reads the environment. |
 | `src/data_fetcher.py` | Thin wrapper around `yfinance.Ticker(symbol).history(period=...)` that returns a `pandas.DataFrame`. |
 | `src/notifier.py` | Splits the report to fit Telegram's message limit and sends it through the `sendMessage` endpoint with `parse_mode=HTML`. |
@@ -200,7 +204,7 @@ All settings are read from environment variables. When you run locally, they are
 |---|:---:|---|---|
 | `TELEGRAM_BOT_TOKEN` | ✅ | — | Bot token issued by [@BotFather](https://t.me/BotFather). |
 | `TELEGRAM_CHAT_ID` | ✅ | — | Target chat, group, or channel ID. |
-| `SYMBOLS` | ❌ | `AAPL,MSFT,NVDA,QQQ,SPY` | Comma-separated list of Yahoo Finance tickers. Blank entries are ignored and tickers are upper-cased. |
+| `SYMBOLS` | ✅ | — | Comma-separated list of Yahoo Finance tickers. Blank entries are ignored and tickers are upper-cased. |
 | `HISTORY_PERIOD` | ❌ | `1y` | How much history to fetch. Accepts any `yfinance` period (`1mo`, `3mo`, `6mo`, `1y`, `2y`, …). |
 
 ### Example `.env`
@@ -377,7 +381,7 @@ class VolumeSpikeIndicator(IndicatorBase):
         )
 ```
 
-**2. Export it** in `src/indicators/__init__.py` (import and `__all__`):
+**2. Export it** in `src/indicators/__init__.py`:
 
 ```python
 from .volume_spike_indicator import VolumeSpikeIndicator
@@ -431,7 +435,7 @@ Then add tests for it under `tests/`.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `ValueError: Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID` | Environment variables not set. | Add them to `.env` locally or to the Lambda configuration. |
+| `ValueError: Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID` / `Missing SYMBOLS` | Environment variables not set. | Add them to `.env` locally or to the Lambda configuration. |
 | SMA 200 never appears; log says *"only N rows of history"* | `HISTORY_PERIOD` is too short. | Set `HISTORY_PERIOD=1y` or longer. |
 | `requests.exceptions.HTTPError: 400`/`403` from `api.telegram.org` | Telegram rejected the message (wrong chat ID, or the bot isn't in the chat). | Check the token and chat ID with `getUpdates`, and make sure the bot has been started or added. |
 | `Error processing XYZ` in the logs, and *"Failed to scan: XYZ"* in the report | Invalid ticker or a Yahoo Finance outage or rate limit. | Check the ticker on finance.yahoo.com. Other symbols are not affected. |

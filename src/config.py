@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
-DEFAULT_SYMBOLS = "AAPL,MSFT,NVDA,QQQ,SPY"
+
 DEFAULT_HISTORY_PERIOD = "1y"
 
 
@@ -25,7 +25,7 @@ class Config:
     def from_env(cls) -> "Config":
         """Build the configuration from environment variables (and `.env` locally).
 
-        Raises ValueError if the Telegram credentials are missing.
+        Raises ValueError if the Telegram credentials or SYMBOLS are missing.
         """
         load_dotenv()
 
@@ -37,9 +37,13 @@ class Config:
                 "in environment variables."
             )
 
+        symbols = parse_symbols(os.getenv("SYMBOLS", ""))
+        if not symbols:
+            raise ValueError("Missing SYMBOLS in environment variables.")
+
         return cls(
             telegram_bot_token=telegram_bot_token,
             telegram_chat_id=telegram_chat_id,
-            symbols=parse_symbols(os.getenv("SYMBOLS") or DEFAULT_SYMBOLS),
+            symbols=symbols,
             history_period=os.getenv("HISTORY_PERIOD") or DEFAULT_HISTORY_PERIOD,
         )

@@ -1,5 +1,6 @@
 import requests
 
+
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
 REQUEST_TIMEOUT_SECONDS = 10
 
@@ -29,7 +30,7 @@ def split_message(
     return messages
 
 
-def send_telegram_alert(bot_token: str, chat_id: str, message: str) -> None:
+def send_telegram_alert(bot_token: str, chat_id: str, message: str):
     """Send an HTML-formatted message to a Telegram chat.
 
     Raises requests.HTTPError if Telegram rejects the message.
