@@ -16,13 +16,26 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version-file: '.python-version'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.0'
+          enable-cache: true
+
+      - name: Lint & test
+        run: |
+          uv sync --locked
+          uv run black --check .
+          uv run ruff check .
+          uv run pytest
 
       - name: Install dependencies & package code
         run: |
-          python -m pip install --upgrade pip
           mkdir artifact
-          pip install -r requirements.txt -t artifact/
+          uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt -o lambda-requirements.txt
+          uv pip install -r lambda-requirements.txt --target artifact/
           cp -r src artifact/
           cp -r app.py artifact/
           cd artifact && zip -r ../deployment_package.zip .

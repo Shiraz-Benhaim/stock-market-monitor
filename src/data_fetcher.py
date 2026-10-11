@@ -1,12 +1,7 @@
-import yfinance as yf
 import pandas as pd
+import yfinance as yf
 
-from src.config import Config
 
-
-def fetch_market_history(symbol: str) -> pd.DataFrame:
-    """Fetches historical daily market data for a given symbol."""
-
-    ticker = yf.Ticker(symbol)
-    market_history = ticker.history(period=Config.HISTORY_PERIOD)
-    return market_history
+def fetch_market_history(symbol: str, period: str) -> pd.DataFrame:
+    """Fetch historical daily market data for a symbol over a yfinance period."""
+    return yf.Ticker(symbol).history(period=period)
