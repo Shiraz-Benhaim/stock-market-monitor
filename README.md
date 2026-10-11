@@ -37,7 +37,7 @@ This document explains how the system works, how to configure and deploy it, and
 1. Downloads recent daily price history for every symbol on your watchlist.
 2. Runs each configured technical indicator against that history.
 3. Groups all triggered signals per symbol into a single, readable report.
-4. Pushes the report to a Telegram chat. If no indicator fires, nothing is sent.
+4. Pushes the report to a Telegram chat. Symbols that failed to load are listed at the end. If nothing fires and nothing fails, no message is sent.
 
 ### Design goals
 
@@ -64,18 +64,18 @@ This document explains how the system works, how to configure and deploy it, and
 ┌──────────────────────────────────────────────────────────────┐
 │  AWS Lambda  —  app.lambda_handler                           │
 │                                                              │
-│   Config.validate()                                          │
+│   Config.from_env()                                          │
 │        │                                                     │
 │        ▼                                                     │
-│   for each symbol in SYMBOLS:                                │
+│   run_pipeline(config) — for each symbol in SYMBOLS:         │
 │        ├─► data_fetcher.fetch_market_history()  ──► yfinance │
-│        ├─► indicator.evaluate()  × N indicators              │
-│        └─► collect triggered alerts                          │
+│        ├─► scan_symbol()  →  indicator.evaluate() × N        │
+│        └─► format_symbol_report()                            │
 │        │                                                     │
 │        ▼                                                     │
-│   build consolidated report                                  │
+│   add failed symbols, split into ≤ 4096-char messages        │
 └──────────┬───────────────────────────────────────────────────┘
-           │ HTTPS POST (only if ≥1 alert)
+           │ HTTPS POST (only if ≥1 alert or failure)
            ▼
 ┌──────────────────────┐
 │   Telegram Bot API   │ ──► your chat / channel
@@ -86,11 +86,11 @@ This document explains how the system works, how to configure and deploy it, and
 
 | Step | Component | Description |
 |---|---|---|
-| 1 | `Config.validate()` | Fails fast if `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID` is missing. |
+| 1 | `Config.from_env()` | Builds an immutable `Config` from environment variables. Fails fast if `TELEGRAM_BOT_TOKEN` or `TELEGRAM_CHAT_ID` is missing. |
 | 2 | `data_fetcher.fetch_market_history()` | Downloads daily OHLCV data from Yahoo Finance via `yfinance` for the period set by `HISTORY_PERIOD`. |
-| 3 | `IndicatorBase.evaluate()` | Each active indicator inspects the DataFrame. It returns an alert `dict` when its condition is met and `None` otherwise. |
-| 4 | `run_pipeline()` | Collects the triggered alerts for each symbol and formats them into one Markdown block per symbol that includes the latest close price. |
-| 5 | `notifier.send_telegram_alert()` | Joins all symbol blocks with a separator and sends them as a single Telegram message. |
+| 3 | `scan_symbol()` | Runs each active indicator whose `min_history` is satisfied (logging a warning for any that are skipped). `evaluate()` returns an `IndicatorResult` when its condition is met and `None` otherwise. |
+| 4 | `format_symbol_report()` | Formats the triggered alerts for each symbol into one HTML block that includes the latest close price. Symbols that failed to load are collected into a final "Failed to scan" block. |
+| 5 | `notifier.split_message()` / `send_telegram_alert()` | Joins the blocks with a separator into as few messages as fit Telegram's 4,096-character limit and sends them. A rejected message raises, so the Lambda invocation fails visibly. |
 
 ---
 
@@ -104,25 +104,26 @@ stock-market-monitor/
 ├── .python-version              # Python version used by uv and CI (3.10)
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml           # CI/CD: package & deploy to Lambda on push to main
+│       └── deploy.yml           # CI/CD: lint, test, package & deploy to Lambda on push to main
+├── tests/                       # pytest suite (indicators, report formatting, pipeline)
 └── src/
     ├── config.py                # Environment-driven configuration & validation
     ├── data_fetcher.py          # Market data retrieval (yfinance)
-    ├── notifier.py              # Telegram delivery
+    ├── notifier.py              # Telegram delivery & message splitting
     └── indicators/
         ├── __init__.py          # Public indicator exports
-        ├── base.py              # IndicatorBase — abstract strategy interface
-        ├── sma_cross_indicator.py
+        ├── base.py              # IndicatorBase & IndicatorResult — the strategy interface
+        ├── price_below_sma_indicator.py
         └── rsi_indicator.py
 ```
 
 | Module | Responsibility |
 |---|---|
-| `app.py` | Defines the active indicator set, iterates over symbols, builds the report, and exposes `lambda_handler(event, context)`. |
-| `src/config.py` | Loads `.env` (via `python-dotenv`) and exposes typed settings on the `Config` class. |
-| `src/data_fetcher.py` | Thin wrapper around `yfinance.Ticker(symbol).history(...)` that returns a `pandas.DataFrame`. |
-| `src/notifier.py` | Sends a message through the Telegram `sendMessage` endpoint with `parse_mode=Markdown`. |
-| `src/indicators/base.py` | The `IndicatorBase` abstract class. Every indicator must implement it. |
+| `app.py` | Defines `ACTIVE_INDICATORS`, scans each symbol, formats the report, and exposes `lambda_handler(event, context)`. |
+| `src/config.py` | The frozen `Config` dataclass. `Config.from_env()` loads `.env` (via `python-dotenv`) and reads the environment. |
+| `src/data_fetcher.py` | Thin wrapper around `yfinance.Ticker(symbol).history(period=...)` that returns a `pandas.DataFrame`. |
+| `src/notifier.py` | Splits the report to fit Telegram's message limit and sends it through the `sendMessage` endpoint with `parse_mode=HTML`. |
+| `src/indicators/base.py` | The `IndicatorBase` abstract class every indicator implements, and the `IndicatorResult` it returns. |
 
 ---
 
@@ -131,17 +132,17 @@ stock-market-monitor/
 The active indicator set is defined in `app.py`:
 
 ```python
-active_indicators: list[IndicatorBase] = [
-    SMACrossIndicator(window=20,  threshold_percentage=0.0),  # SMA 20
-    SMACrossIndicator(window=50,  threshold_percentage=0.0),  # SMA 50
-    SMACrossIndicator(window=200, threshold_percentage=0.0),  # SMA 200
-    RSIIndicator(period=14, oversold=35.0),                   # RSI oversold
+ACTIVE_INDICATORS: list[IndicatorBase] = [
+    PriceBelowSMAIndicator(window=20),
+    PriceBelowSMAIndicator(window=50),
+    PriceBelowSMAIndicator(window=200),
+    RSIIndicator(period=14, oversold=35.0),
 ]
 ```
 
-### 4.1 SMA Cross — `SMACrossIndicator`
+### 4.1 Price Below SMA — `PriceBelowSMAIndicator`
 
-Fires when the latest closing price is **at or below** its Simple Moving Average (SMA), optionally by at least a given margin.
+Fires when the latest closing price is **at or below** its Simple Moving Average (SMA), optionally by at least a given margin. This is a level check, not a crossover: it fires on every run while the price stays below the SMA.
 
 **Logic**
 
@@ -159,13 +160,11 @@ trigger if   Close_latest ≤ target
 **Alert payload**
 
 ```python
-{
-    "indicator": "SMA_50",
-    "latest_price": 182.31,
-    "sma_value": 188.90,
-    "diff_percentage": -3.49,
-    "message": "Price ($182.31) is below SMA_50 ($188.90) by 3.49%"
-}
+IndicatorResult(
+    indicator="SMA_50",
+    message="Price ($182.31) is below SMA_50 ($188.90) by 3.49%",
+    details={"latest_price": 182.31, "sma_value": 188.90, "diff_percentage": -3.49},
+)
 ```
 
 > **Data requirement:** the indicator needs at least `window` rows of history and returns `None` if it has fewer. See [`HISTORY_PERIOD`](#5-configuration).
@@ -178,10 +177,10 @@ Fires when the **Relative Strength Index** falls to or below the oversold thresh
 
 ```text
 Δ            = Close.diff()
-avg_gain     = rolling mean of positive Δ over `period`
-avg_loss     = rolling mean of |negative Δ| over `period`
+avg_gain     = Wilder-smoothed mean of positive Δ   (EWM, α = 1 / period)
+avg_loss     = Wilder-smoothed mean of |negative Δ| (EWM, α = 1 / period)
 RSI          = 100 − 100 / (1 + avg_gain / avg_loss)
-trigger if   RSI_latest ≤ oversold
+trigger if   RSI_latest ≤ oversold   (no trigger when prices are flat: RSI is undefined)
 ```
 
 | Parameter | Type | Default | Description |
@@ -189,7 +188,7 @@ trigger if   RSI_latest ≤ oversold
 | `period` | `int` | `14` | RSI look-back period in trading days. |
 | `oversold` | `float` | `30.0` | Alert threshold (0–100). The pipeline uses `35.0`. |
 
-> **Note:** this implementation averages gains and losses with a simple rolling mean (Cutler's RSI). It doesn't use Wilder's exponential smoothing, so its values can differ slightly from those shown on charting platforms such as TradingView.
+> **Note:** Wilder's smoothing matches the RSI shown on charting platforms such as TradingView once there is enough history to warm up (a few multiples of `period`; the default `1y` is plenty).
 
 ---
 
@@ -201,8 +200,8 @@ All settings are read from environment variables. When you run locally, they are
 |---|:---:|---|---|
 | `TELEGRAM_BOT_TOKEN` | ✅ | — | Bot token issued by [@BotFather](https://t.me/BotFather). |
 | `TELEGRAM_CHAT_ID` | ✅ | — | Target chat, group, or channel ID. |
-| `SYMBOLS` | ❌ | `AAPL,MSFT,NVDA,QQQ,SPY` | Comma-separated list of Yahoo Finance tickers. |
-| `HISTORY_PERIOD` | ❌ | `3mo` | How much history to fetch. Accepts any `yfinance` period (`1mo`, `3mo`, `6mo`, `1y`, `2y`, …). |
+| `SYMBOLS` | ❌ | `AAPL,MSFT,NVDA,QQQ,SPY` | Comma-separated list of Yahoo Finance tickers. Blank entries are ignored and tickers are upper-cased. |
+| `HISTORY_PERIOD` | ❌ | `1y` | How much history to fetch. Accepts any `yfinance` period (`1mo`, `3mo`, `6mo`, `1y`, `2y`, …). |
 
 ### Example `.env`
 
@@ -213,7 +212,7 @@ SYMBOLS=AAPL,MSFT,NVDA,GOOGL,QQQ,SPY
 HISTORY_PERIOD=1y
 ```
 
-> ⚠️ **Choosing `HISTORY_PERIOD`:** `3mo` provides only about 63 trading days, so **SMA 200 can never trigger**. SMA 50 also gets few data points. Use `1y` (about 252 trading days) or longer if you keep the SMA 200 indicator.
+> ⚠️ **Choosing `HISTORY_PERIOD`:** each indicator declares a `min_history`, and is skipped (with a warning in the logs) when the fetched history is shorter. `3mo` provides only about 63 trading days, so **SMA 200 would never run**. Keep `1y` (about 252 trading days) or longer while the SMA 200 indicator is active.
 
 ### Getting Telegram credentials
 
@@ -246,9 +245,19 @@ uv sync
 uv run app.py
 ```
 
-To manage dependencies, use `uv add <package>` and `uv remove <package>`. Both update `pyproject.toml` and `uv.lock` together. Commit both files.
+To manage dependencies, use `uv add <package>` and `uv remove <package>`. Both update `pyproject.toml` and `uv.lock` together. Commit both files. Dev-only tools go in the `dev` group (`uv add --dev <package>`) and are left out of the Lambda package.
 
-The console output shows either `Summary report sent successfully.` followed by the report, or `No indicators triggered today.`
+The console output shows either the report followed by `Summary report sent successfully.`, or `No indicators triggered today.`
+
+### Tests & code style
+
+The code follows PEP 8 and is formatted with [black](https://black.readthedocs.io/) (line length 88). [ruff](https://docs.astral.sh/ruff/) checks PEP 8 and import order. CI runs all three before every deploy:
+
+```bash
+uv run black .          # format
+uv run ruff check .     # lint (add --fix to auto-fix)
+uv run pytest           # tests
+```
 
 ---
 
@@ -258,11 +267,12 @@ The console output shows either `Summary report sent successfully.` followed by 
 
 Every push to `main` runs [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml), which does the following:
 
-1. Sets up Python (version from `.python-version`) and uv on `ubuntu-latest`.
-2. Exports the locked runtime dependencies with `uv export`, installs them into an `artifact/` directory with `uv pip install --target`, and copies in `app.py` and `src/`.
-3. Zips the result into `deployment_package.zip`.
-4. Uploads the zip to **S3** at `s3://stock-market-monitor-deployments/deployment_package.zip`.
-5. Runs `aws lambda update-function-code` on the **`stock-market-monitor`** function in **`us-east-1`**.
+1. Sets up Python (version from `.python-version`) and a pinned uv version on `ubuntu-latest`.
+2. Runs `black --check`, `ruff check`, and `pytest`. A failure stops the deploy.
+3. Exports the locked runtime dependencies with `uv export --frozen` (CI fails if `uv.lock` is missing), installs them into an `artifact/` directory with `uv pip install --target`, and copies in `app.py` and `src/`.
+4. Zips the result into `deployment_package.zip`.
+5. Uploads the zip to **S3** at `s3://stock-market-monitor-deployments/deployment_package.zip`.
+6. Runs `aws lambda update-function-code` on the **`stock-market-monitor`** function in **`us-east-1`**.
 
 The package goes through S3 because `pandas` and `numpy` make it larger than Lambda's 50 MB limit for direct uploads.
 
@@ -301,7 +311,7 @@ The workflow only *updates* existing resources. Create these once before the fir
 2. **Lambda function** named `stock-market-monitor`:
    | Setting | Recommended value |
    |---|---|
-   | Runtime | Python 3.10 (to match CI) |
+   | Runtime | Python 3.10. **Must match `.python-version`**: compiled wheels (`pandas`, `numpy`) are built for that exact version, so bump both together. |
    | Handler | `app.lambda_handler` |
    | Memory | 512 MB |
    | Timeout | 60 s or more. The 3 s default is too short for network calls across several symbols. |
@@ -320,7 +330,9 @@ On success, the handler returns:
 { "statusCode": 200, "body": "Pipeline executed successfully" }
 ```
 
-The handler's `print` output, including per-symbol errors, goes to **Amazon CloudWatch Logs** under `/aws/lambda/stock-market-monitor`.
+If the Telegram message is rejected, the handler raises instead, so the invocation shows up as an error in the Lambda metrics.
+
+The handler's log output, including per-symbol errors with tracebacks, goes to **Amazon CloudWatch Logs** under `/aws/lambda/stock-market-monitor`.
 
 ---
 
@@ -333,54 +345,63 @@ Adding an indicator takes three steps, and you never touch the pipeline logic.
 ```python
 import pandas as pd
 
-from src.indicators.base import IndicatorBase
+from src.indicators.base import IndicatorBase, IndicatorResult
 
 
 class VolumeSpikeIndicator(IndicatorBase):
-    """Triggers when today's volume exceeds the average volume by a multiplier."""
+    """Trigger when today's volume exceeds the average volume by a multiplier."""
 
     def __init__(self, window: int = 20, multiplier: float = 2.0):
         self.window = window
         self.multiplier = multiplier
 
-    def evaluate(self, market_history: pd.DataFrame) -> dict | None:
-        if len(market_history) < self.window + 1:
+    @property
+    def min_history(self) -> int:
+        return self.window + 1
+
+    def evaluate(self, market_history: pd.DataFrame) -> IndicatorResult | None:
+        if len(market_history) < self.min_history:
             return None
 
-        avg_volume = market_history['Volume'].iloc[-self.window - 1:-1].mean()
-        latest_volume = market_history['Volume'].iloc[-1]
+        volumes = market_history["Volume"]
+        avg_volume = volumes.iloc[-self.window - 1 : -1].mean()
+        latest_volume = volumes.iloc[-1]
 
-        if latest_volume >= avg_volume * self.multiplier:
-            ratio = latest_volume / avg_volume
-            return {
-                "indicator": f"VOLUME_SPIKE_{self.window}",
-                "message": f"Volume is {ratio:.1f}x the {self.window}-day average"
-            }
-        return None
+        if latest_volume < avg_volume * self.multiplier:
+            return None
+
+        ratio = latest_volume / avg_volume
+        return IndicatorResult(
+            indicator=f"VOLUME_SPIKE_{self.window}",
+            message=f"Volume is {ratio:.1f}x the {self.window}-day average",
+        )
 ```
 
-**2. Export it** in `src/indicators/__init__.py`:
+**2. Export it** in `src/indicators/__init__.py` (import and `__all__`):
 
 ```python
 from .volume_spike_indicator import VolumeSpikeIndicator
 ```
 
-**3. Register it** in `active_indicators` in `app.py`:
+**3. Register it** in `ACTIVE_INDICATORS` in `app.py`:
 
 ```python
 VolumeSpikeIndicator(window=20, multiplier=2.0),
 ```
+
+Then add tests for it under `tests/`.
 
 ### The `evaluate()` contract
 
 | Rule | Detail |
 |---|---|
 | **Input** | A `pandas.DataFrame` indexed by date, with columns `Open`, `High`, `Low`, `Close`, `Volume`, `Dividends`, and `Stock Splits`. |
-| **Return when triggered** | A `dict` that **must** contain `indicator` (short label) and `message` (human-readable text). Additional keys are allowed and are useful for debugging. |
+| **`min_history`** | A property returning the minimum number of rows `evaluate()` needs. The pipeline skips the indicator (with a warning) when there is less history. |
+| **Return when triggered** | An `IndicatorResult` with `indicator` (short label) and `message` (human-readable plain text). Put extra values in `details`; they are useful for debugging. |
 | **Return otherwise** | `None`. |
 | **Insufficient data** | Return `None` rather than raising an exception. |
-| **Markdown safety** | Messages are sent with Telegram's legacy Markdown, so avoid unescaped `_`, `*`, `` ` ``, and `[` in dynamic text. |
-| **Side effects** | Avoid mutating `market_history`. The same DataFrame is passed to every indicator. |
+| **Formatting** | Return plain text. The report is sent with Telegram's HTML parse mode, and the pipeline HTML-escapes `indicator` and `message`. |
+| **Side effects** | Don't mutate `market_history`. The same DataFrame is passed to every indicator. |
 
 ---
 
@@ -411,9 +432,9 @@ VolumeSpikeIndicator(window=20, multiplier=2.0),
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `ValueError: Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID` | Environment variables not set. | Add them to `.env` locally or to the Lambda configuration. |
-| SMA 200 never appears | `HISTORY_PERIOD` is too short. | Set `HISTORY_PERIOD=1y` or longer. |
-| Log says *"sent successfully"* but no message arrives | Telegram rejected the request (wrong chat ID, bot not in the chat, or a Markdown parse error). | Check the token and chat ID with `getUpdates`, make sure the bot has been started or added, and look for unescaped Markdown characters. |
-| `Error processing XYZ: ...` in the logs | Invalid ticker or a Yahoo Finance outage or rate limit. | Check the ticker on finance.yahoo.com. Other symbols are not affected. |
+| SMA 200 never appears; log says *"only N rows of history"* | `HISTORY_PERIOD` is too short. | Set `HISTORY_PERIOD=1y` or longer. |
+| `requests.exceptions.HTTPError: 400`/`403` from `api.telegram.org` | Telegram rejected the message (wrong chat ID, or the bot isn't in the chat). | Check the token and chat ID with `getUpdates`, and make sure the bot has been started or added. |
+| `Error processing XYZ` in the logs, and *"Failed to scan: XYZ"* in the report | Invalid ticker or a Yahoo Finance outage or rate limit. | Check the ticker on finance.yahoo.com. Other symbols are not affected. |
 | Lambda `Task timed out` | Timeout too low. | Raise the timeout to at least 60 s. |
 | `Unable to import module 'app'` | Wrong handler, or the package was zipped with an extra parent folder. | Set the handler to `app.lambda_handler` and make sure `app.py` is at the zip root. |
 
@@ -424,17 +445,15 @@ VolumeSpikeIndicator(window=20, multiplier=2.0),
 **Current limitations**
 
 - The indicator set and its parameters are set in code. Changing them requires a redeploy.
-- The return value of `send_telegram_alert` isn't checked, so delivery failures are not surfaced.
-- Telegram limits a message to 4,096 characters, and very large watchlists with many alerts may exceed it.
+- `PriceBelowSMAIndicator` is a level check, so it repeats every run while a price stays below its SMA.
 - `RSIIndicator` detects oversold conditions only. Overbought detection is not implemented yet.
-- There's no automated test suite yet.
 
 **Possible next steps**
 
-- [ ] Unit tests for indicators using fixed DataFrame fixtures (`pytest`).
+- [ ] Configure the indicator set from the environment instead of code.
+- [ ] A true SMA crossover indicator (fires only on the run the price crosses).
 - [ ] Overbought RSI, MACD, and Bollinger Band indicators.
 - [ ] Move secrets to AWS SSM Parameter Store or Secrets Manager.
-- [ ] Split long reports into multiple Telegram messages.
 - [ ] Infrastructure as Code (AWS SAM / Terraform) for the one-time setup.
 - [ ] Use GitHub OIDC for AWS authentication instead of long-lived access keys.
 

@@ -20,11 +20,21 @@ jobs:
 
       - name: Install uv
         uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.0'
+          enable-cache: true
+
+      - name: Lint & test
+        run: |
+          uv sync --locked
+          uv run black --check .
+          uv run ruff check .
+          uv run pytest
 
       - name: Install dependencies & package code
         run: |
           mkdir artifact
-          uv export --no-dev --no-hashes --no-emit-project --format requirements-txt -o lambda-requirements.txt
+          uv export --frozen --no-dev --no-hashes --no-emit-project --format requirements-txt -o lambda-requirements.txt
           uv pip install -r lambda-requirements.txt --target artifact/
           cp -r src artifact/
           cp -r app.py artifact/

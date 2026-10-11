@@ -1,21 +1,45 @@
 import os
+from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+DEFAULT_SYMBOLS = "AAPL,MSFT,NVDA,QQQ,SPY"
+DEFAULT_HISTORY_PERIOD = "1y"
 
-load_dotenv()
+
+def parse_symbols(raw_symbols: str) -> tuple[str, ...]:
+    """Split a comma-separated symbol list, dropping blanks and normalizing case."""
+    return tuple(
+        symbol.strip().upper() for symbol in raw_symbols.split(",") if symbol.strip()
+    )
 
 
+@dataclass(frozen=True)
 class Config:
-    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-    TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-    SYMBOLS = [symbol.strip() for symbol in os.getenv("SYMBOLS", "AAPL,MSFT,NVDA,QQQ,SPY").split(",")]
+    telegram_bot_token: str
+    telegram_chat_id: str
+    symbols: tuple[str, ...]
+    history_period: str = DEFAULT_HISTORY_PERIOD
 
-    HISTORY_PERIOD = os.getenv("HISTORY_PERIOD") or "3mo"
-
-    SUCCESS_HTTP_STATUS_CODE = 200
-    
     @classmethod
-    def validate(cls):
-        if not cls.TELEGRAM_BOT_TOKEN or not cls.TELEGRAM_CHAT_ID:
-            raise ValueError("Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in environment variables.")
+    def from_env(cls) -> "Config":
+        """Build the configuration from environment variables (and `.env` locally).
+
+        Raises ValueError if the Telegram credentials are missing.
+        """
+        load_dotenv()
+
+        telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+        telegram_chat_id = os.getenv("TELEGRAM_CHAT_ID")
+        if not telegram_bot_token or not telegram_chat_id:
+            raise ValueError(
+                "Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID "
+                "in environment variables."
+            )
+
+        return cls(
+            telegram_bot_token=telegram_bot_token,
+            telegram_chat_id=telegram_chat_id,
+            symbols=parse_symbols(os.getenv("SYMBOLS") or DEFAULT_SYMBOLS),
+            history_period=os.getenv("HISTORY_PERIOD") or DEFAULT_HISTORY_PERIOD,
+        )
