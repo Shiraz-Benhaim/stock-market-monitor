@@ -3,11 +3,12 @@ import re
 
 from src.indicators import IndicatorResult
 
-
 REPORT_SEPARATOR = "\n\n───────────────\n\n"
 
 
-def format_symbol_report(symbol: str, latest_price: float, results: list[IndicatorResult]) -> str:
+def format_symbol_report(
+    symbol: str, latest_price: float, results: list[IndicatorResult]
+) -> str:
     alert_lines = "\n".join(
         f"  • <b>{html.escape(result.indicator)}:</b> {html.escape(result.message)}"
         for result in results
