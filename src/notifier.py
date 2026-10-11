@@ -1,6 +1,11 @@
 import requests
 
+<<<<<<< Updated upstream
 from config import Config
+=======
+TELEGRAM_MAX_MESSAGE_LENGTH = 4096
+REQUEST_TIMEOUT_SECONDS = 10
+>>>>>>> Stashed changes
 
 
 def send_telegram_alert(bot_token: str, chat_id: str, message: str) -> bool:

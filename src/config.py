@@ -2,8 +2,12 @@ import os
 
 from dotenv import load_dotenv
 
+<<<<<<< Updated upstream
 
 load_dotenv()
+=======
+DEFAULT_HISTORY_PERIOD = "1y"
+>>>>>>> Stashed changes
 
 
 class Config:
