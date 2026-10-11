@@ -32,9 +32,6 @@ select = ["E", "W", "F", "I"]
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]  # imports there are the package's public re-exports
 
-[tool.ruff.lint.isort]
-lines-after-imports = 2
-
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]

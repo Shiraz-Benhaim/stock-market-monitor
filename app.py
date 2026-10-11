@@ -5,7 +5,6 @@ from src.config import Config
 from src.indicators import IndicatorBase, PriceBelowSMAIndicator, RSIIndicator
 from src.scanner import scan_symbol
 
-
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 

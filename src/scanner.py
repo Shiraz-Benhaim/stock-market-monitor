@@ -4,7 +4,6 @@ import pandas as pd
 
 from src.indicators import IndicatorBase, IndicatorResult
 
-
 logger = logging.getLogger(__name__)
 
 

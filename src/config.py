@@ -3,7 +3,6 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
-
 DEFAULT_HISTORY_PERIOD = "1y"
 
 
